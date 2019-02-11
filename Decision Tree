@@ -1,0 +1,370 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Sep 24 23:34:19 2018
+
+@author: Meghna
+"""
+
+import math
+import copy
+import random
+from random import randint
+import pandas as pd
+
+
+training_set_path = input("Enter training set path: ")
+test_set_path = input("Enter test set path: ")
+validation_set_path = input("Enter validation set path: ")
+L = int(input("L: "))
+K = int(input("K: "))
+to_print = input("to_print: ")
+
+
+def counter(rows):
+    #Function counts the number of each type of example in a dataset.
+    counts = {}  # creates an empty dictionary of attribute and count.
+    for row in rows:        
+        attr = row[-1] #row[-1] to retrieve the last attribute of the dataset
+        if attr not in counts:
+            counts[attr] = 0
+        counts[attr] += 1
+    return counts
+
+
+class BestAttribute:
+    '''
+    Best attribute - attribute on which the split is performed
+    This records the information about the best attribute such as columnn number and column value.
+    '''
+
+    def __init__(self, column, value, header):
+        self.column = column
+        self.value = value
+        self.header = header
+
+    #The value stored in best attribute chosen and the value stored in an example are compared using the compare function
+    def compare(self, example):
+        val = example[self.column]
+        return val == self.value
+
+    def __repr__(self):
+        # This is just a helper method to print
+        # the question in a readable format.
+        condition = "="
+        
+        return "%s %s" % (self.header[self.column], condition)
+
+
+def split(rows, bestattr):
+    
+    '''
+    Partitions the dataset.
+    Splits the dataset into left and right branch based on the value of the chosen attribute
+    '''
+    left_branch, right_branch = [], []
+    for row in rows:
+        if bestattr.compare(row):
+            left_branch.append(row)
+        else:
+            right_branch.append(row)
+    return left_branch, right_branch
+
+
+def variance_impurity(rows):
+
+    #Calculate the Variance impurity on rows of each attribute.
+    counts = counter(rows)
+    impurity = 1
+    num = len(rows)
+    for x in counts:
+        proportion = counts[x] / num
+        impurity -= proportion**2
+    return impurity
+
+
+def entropy(rows):
+    
+    #Calculate the Entropy on rows of each attribute.
+    counts = counter(rows)
+    num = len(rows)
+    entropy = 0
+    for x in counts:
+        proportion = counts[x] / num
+        entropy += (-1.0*proportion*math.log(proportion,2))
+
+    return entropy
+
+
+def informationGain_entropy(left, right, start_entropy):
+   
+    #Calculate Information Gain  = entropy of starting node - weighted entropy of the child nodes
+    prop = float(len(left)) / (len(left) + len(right))
+    return start_entropy - prop * entropy(left) - (1 - prop) * entropy(right)
+
+
+def informationGain_variance(left, right, start_var_impurity):
+   
+    #Calculate Information Gain  = variance of starting node - weighted variance of the child nodes
+    prop = float(len(left)) / (len(left) + len(right))
+    return start_var_impurity - prop * variance_impurity(left) - (1 - prop) * variance_impurity(right)
+    
+
+def find_best_split_OnEntropy(rows, header):
+   
+    best_gain = 0  #records the best information gain
+    best_split_attr = None  
+    
+    start_entropy = entropy(rows)
+    attributes = len(rows[0]) - 1  
+
+    #Stores the unique values in each column of attributes
+    for col in range(attributes):  
+        values = set([row[col] for row in rows])  
+        
+        for val in values:  
+            bestattr = BestAttribute(col, val, header)
+            #Splits the data set and stores the left and right brances of the tree
+            leftbranch, rightbranch = split(rows, bestattr) 
+            #Checks if this is a leaf node, therefore skipping this split if it is
+            if len(leftbranch) == 0 or len(rightbranch) == 0: 
+                continue
+            # Calculate the information gain (using entropy) from this split
+            info_gain = informationGain_entropy(leftbranch, rightbranch, start_entropy)
+
+            if info_gain >= best_gain:
+                best_gain, best_split_attr = info_gain, bestattr
+
+    return best_gain, best_split_attr
+
+
+
+def find_best_split_OnVariance(rows, header):
+    
+    best_gain = 0  #records the best information gain
+    best_split_attr = None  
+
+    start_variance = entropy(rows)
+    attributes = len(rows[0]) - 1  
+
+    #Stores the unique values in each column of attributes
+    for col in range(attributes):
+        values = set([row[col] for row in rows])  
+
+        for val in values: 
+            bestattr = BestAttribute(col, val, header)
+            #Splits the data set and stores the left and right brances of the tree
+            leftbranch, rightbranch = split(rows, bestattr)
+            #Checks if this a leaf node, therefore skipping this split if it is
+            if len(leftbranch) == 0 or len(rightbranch) == 0: 
+                continue
+            # Calculate the information gain from this split
+            info_gain = informationGain_variance(leftbranch, rightbranch, start_variance)
+
+            if info_gain >= best_gain:
+                best_gain, best_split_attr = info_gain, bestattr
+
+    return best_gain, best_split_attr
+
+
+class Leaf:
+    #Records information of each leaf node
+    def __init__(self, rows, id, depth):
+        self.predictions = counter(rows)
+        self.id = id
+        self.depth = depth
+        self.label = max(self.predictions, key = lambda k: self.predictions[k])
+        
+
+class Decision_Node:
+    
+    def __init__(self, bestattr,left_branch,right_branch,depth,id,rows,pruned=0):
+        self.bestattr = bestattr
+        self.left_branch = left_branch
+        self.right_branch = right_branch
+        self.depth = depth
+        self.id = id
+        self.rows = rows
+
+
+def id3_build(rows, header, depth=0, id=0, n=0):
+   
+    #partitions the dataset on each of the attributes and calculates the information gain.
+    if(n==0): #when n=0, split and build tree using entropy
+        gain, bestattr = find_best_split_OnEntropy(rows, header)
+    if(n==1): #when n=1, split and build tree using variance impurity
+        gain, bestattr = find_best_split_OnVariance(rows, header)
+    #when no further info gain, return leaf node
+    if gain == 0:
+        return Leaf(rows, id, depth)
+    
+    left_branch, right_branch = split(rows, bestattr)
+    #recursively builds the true branch.
+    left_tree = id3_build(left_branch, header, depth + 1, 2 * id + 2, n)
+    #recursively builds the false branch.
+    right_tree = id3_build(right_branch, header, depth + 1, 2 * id + 1, n)
+
+    #returns the decision node and records best attribute along with the branches to follow based on the value of that attribute
+    return Decision_Node(bestattr, left_tree, right_tree, depth, id, rows)
+
+
+def pruneTree(L, K, node):
+    
+    TreeList = [] #an empty list to store the trees built after each prune
+    accuracy = [] #a list to store the accuracies obtained from each tree pruning
+    nonleafNodes = _nonleafNodes(node) #traverses the non-leaf nodes of the tree
+    oldTree = copy.deepcopy(node) #saves the orginal tree
+    prunedTree = node #assigns original tree to start with pruning
+    
+    for i in range(L):
+        node = copy.deepcopy(oldTree) 
+        M = randint(0,K) #finds a random number
+        for x in range(M):
+            P = random.choice(nonleafNodes) #selects a random non-leaf node from the inputed range
+            #print(P.id)
+            prunedTree = tree_pruning(P,prunedTree)
+            TreeList.append(prunedTree)
+        acc = calculateAccuracy(validation, prunedTree)
+        accuracy.append(acc)
+        print ("Accuracy", i+1 ,": ",acc)
+        
+    #finds the maximum accuracy using which the best pruned tree is returned
+    maxValue = max(accuracy)
+    maxIndex = accuracy.index(maxValue)
+    #print(maxIndex)
+    prunedTree = TreeList[maxIndex]
+    return prunedTree       
+        
+        
+
+def tree_pruning(P, node):
+    
+    if isinstance(node, Leaf):
+        return node
+    # On reaching a pruned node, turn that node into a leaf node and return. Since it becomes a leaf node, the nodes below it will not be considered       
+    if(P.id == node.id):
+        return Leaf(node.rows, node.id, node.depth)
+    #recursively call this function on the true branch
+    node.left_branch = tree_pruning(P,node.left_branch)
+    #recursively call this function on the false branch
+    node.right_branch = tree_pruning(P,node.right_branch)   
+    
+    return node
+
+
+def classify(row, node):
+
+    #if node is a leaf, return the 
+    if isinstance(node, Leaf):
+        #return node.predictions
+        return node.label
+
+    # Decide whether to follow the true-branch or the false-branch.
+    # Compare the feature / value stored in the node,
+    # to the example we're considering.
+    if node.bestattr.compare(row):
+        return classify(row, node.left_branch)
+    else:
+        return classify(row, node.right_branch)
+
+
+def print_tree(node, spacing=""):
+    if isinstance(node, Leaf):
+        print (node.label)
+        return
+    else:
+        print()
+    #recursively call this function on the true branch
+    print (spacing +str(node.bestattr), '1 :',end="")
+    print_tree(node.left_branch, spacing + "  ")
+    #recursively call this function on the false branch
+    print (spacing +str(node.bestattr), '0 :',end="")
+    print_tree(node.right_branch, spacing + "  ")
+
+
+def _leafNodes(node, leafNodes =[]):
+
+    if isinstance(node, Leaf):
+        leafNodes.append(node)
+        return  
+    #recursively call this function on the true branch
+    _leafNodes(node.left_branch,leafNodes)
+    #recursively call this function on the false branch
+    _leafNodes(node.right_branch,leafNodes)
+    return leafNodes
+
+
+def _nonleafNodes(node, nonleafNodes =[]):
+
+    if isinstance(node, Leaf):
+        return    
+    nonleafNodes.append(node) #creates a list of nodes that are not leaf nodes  
+    _nonleafNodes(node.left_branch,nonleafNodes) #Recursively called on the left branch      
+    _nonleafNodes(node.right_branch,nonleafNodes) #Recursively called on the right branch
+
+    return nonleafNodes
+
+
+def calculateAccuracy(rows, node):
+    num = len(rows)
+    accuracy = 0 
+    for row in rows:
+        attr = classify(row,node)
+        if attr == row[-1]: #retrieves the last column of the dataset
+            accuracy+=1
+    return round(float(accuracy)/num,2)
+
+
+#----------------------------------------------------------------------------------------
+
+training_DF = pd.read_csv(training_set_path)
+header = list(training_DF.columns.values)
+testing_DF = pd.read_csv(test_set_path)
+validation_DF = pd.read_csv(validation_set_path)
+train = training_DF.values.tolist()
+test = testing_DF.values.tolist()
+validation = validation_DF.values.tolist()
+
+
+print("*----------------------Tree built using Entropy:--------------------------*")
+dte = id3_build(train, header,0) 
+if to_print == 'yes':
+    print()
+    print("*Tree before pruning:*")
+    print()
+    print_tree(dte)
+acc = calculateAccuracy(test, dte)
+print()
+print("Accuracy using test data before pruning = " + str(acc))
+print()
+print("*Pruning using validation set:*")
+dte_pruned = pruneTree(L,K,dte)
+
+if to_print == 'yes':
+    print("*Best Tree after pruning:*")
+    print()
+    print_tree(dte_pruned)
+acc = calculateAccuracy(test, dte_pruned)
+print()
+print("Accuracy using test data based on best pruning of tree = " + str(acc))
+
+print()
+print("*-------------------Tree built using Variance Impurity:---------------------*")
+dtv = id3_build(train, header,1) 
+if to_print == 'yes':
+    print()
+    print("*Tree before pruning:*")
+    print_tree(dtv)
+acc = calculateAccuracy(test, dtv)
+print()
+print("Accuracy using test data before pruning = " + str(acc))
+print()
+print("*Pruning using validation set:*")
+dtv_pruned = pruneTree(L,K,dtv)
+if to_print == 'yes':
+    print()
+    print("*Best Tree after pruning:*")
+    print()
+    print_tree(dtv_pruned)
+acc = calculateAccuracy(test, dtv_pruned)
+print()
+print("Accuracy using test data based on best pruning of tree = " + str(acc))
